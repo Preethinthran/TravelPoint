@@ -1,0 +1,15 @@
+model bookings {
+  booking_id     Int                      @id @default(autoincrement())
+  passenger_id   Int
+  trip_id        Int
+  pickup_stop_id Int
+  drop_stop_id   Int
+  booking_date   DateTime?                @default(now()) @db.DateTime(0)
+  amount_paid    Decimal                  @db.Decimal(10, 2)
+  booking_status bookings_booking_status? @default(Confirmed)
+
+  @@index([drop_stop_id], map: "fk_bookings_drop")
+  @@index([passenger_id], map: "fk_bookings_passenger")
+  @@index([pickup_stop_id], map: "fk_bookings_pickup")
+  @@index([trip_id], map: "fk_bookings_trip")
+}

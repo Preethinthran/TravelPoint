@@ -1,0 +1,6 @@
+model route {
+  path_id        Int      @id @default(autoincrement())
+  route_name     String   @db.VarChar(100)
+  total_distance Decimal? @db.Decimal(10, 2)
+  estimated_time String?  @db.VarChar(50)
+}

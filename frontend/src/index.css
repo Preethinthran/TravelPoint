@@ -1,0 +1,17 @@
+/* CLEAN index.css */
+
+/* 1. Reset everything so the browser doesn't add weird gaps */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root, body, #root {
+  width: 100%;
+  height: 100%;
+}
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background-color: #f0f2f5;
+}

@@ -1,0 +1,1910 @@
+openapi: 3.0.0
+info:
+  title: Bus Reservation System API
+  description: |
+    Comprehensive API documentation for the Bus Reservation System. 
+    Includes:
+    1. Public Search API (Searching buses, filtering, sorting).
+    2. Operator API (Manifests, bookings, passenger lists).
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local Development Server
+
+paths:
+
+  /auth/signup:
+    post:
+      summary: Register a new user
+      description : creates a new user account with a hashed password
+      operationId: registerUser
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '409':
+          description: Conflict - Email Already Exists
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: Email Already Exists
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+
+  /auth/login:
+    post:
+      summary: Login to the system
+      description: Authenticate a user and return a JWT token
+      operationId: loginUser
+      tags:
+        - Authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          description: Unauthorized - Invalid credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: Invalid credentials
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # --- ADMIN ROUTES ---
+  /admin/add-operator:
+    post:
+      summary: Create a new Operator (Admin Only)
+      description: |
+        Registers a new user with the role of 'operator'. 
+        Requires a valid JWT token with 'admin' role.
+      operationId: addOperator
+      tags:
+        - Admin
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest' 
+      responses:
+        '201':
+          description: Operator created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden - User is not an Admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict - Email Already Exists
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: Email Already Exists
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  
+  # --- Operator Managing Routes and seats ---
+  /operator/buses/{bus_id}/seats:
+    put:
+      summary: Update Seat Layout (Operator Only)
+      description: |
+        Allows the Operator to update price, type, or status for specific seats in their bus.
+        Useful for defining the bus layout (e.g., setting the first 10 seats as Sleeper).
+      operationId: updateBusLayout
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bus_id
+          schema:
+            type: integer
+          required: true
+          description: The ID of the bus to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSeatsRequest'
+      responses:
+        '200':
+          description: Seats updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateSeatsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '403':
+          description: Forbidden - User is not an Operator or does not own this bus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bus not found
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: Get Bus Layout (Operator Only)
+      description: Fetches all seats for a specific bus. Used to populate the "Edit Layout" dashboard.
+      operationId: getBusLayout
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bus_id
+          schema:
+            type: integer
+          required: true
+          description: ID of the bus to fetch
+      responses:
+        '200':
+          description: List of seats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        seat_id:
+                          type: integer
+                        seat_number:
+                          type: string
+                        seat_type:
+                          type: string
+                        price:
+                          type: number
+                        status:
+                          type: string
+        '403':
+          description: Forbidden - You do not own this bus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /operator/buses:
+    get:
+      summary: Get all buses belonging to the logged-in operator
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of buses retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        bus_id:
+                          type: integer
+                          example: 1
+                        bus_number:
+                          type: string
+                          example: "TN-01-AB-1234"
+                        bus_type:
+                          type: string
+                          example: "AC Sleeper"
+                        total_seats:
+                          type: integer
+                          example: 40
+                        operator_id:
+                          type: integer
+                          example: 5
+        '401':
+          description: Unauthorized (Token missing or invalid)
+        '500':
+          description: Internal Server Error
+
+  # --- OPERATOR ROUTES (Contd) ---
+  /operator/routes:
+    post:
+      summary: Create a New Route (Operator Only)
+      description: |
+        Creates a route (Source -> Destination) and optionally defines intermediate stops.
+        This route can later be assigned to specific bus trips.
+      operationId: createRoute
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteRequest'
+      responses:
+        '201':
+          description: Route created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '403':
+          description: Forbidden - Only Operators can create routes
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: Get All My Routes
+      description: Returns a list of all routes created by the logged-in operator.
+      operationId: getMyRoutes
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of routes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        route_id:
+                          type: integer
+                        source:
+                          type: string
+                        destination:
+                          type: string
+                        total_distance:
+                          type: number
+  /operator/trips:
+    post:
+      summary: Create a new trip (Schedule a bus)
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - bus_id
+                - path_id
+                - departure_time
+                - arrival_time
+              properties:
+                bus_id:
+                  type: integer
+                  example: 1
+                path_id:
+                  type: integer
+                  example: 1
+                departure_time:
+                  type: string
+                  example: "2025-12-25 21:00:00"
+                arrival_time:
+                  type: string
+                  example: "2025-12-26 06:00:00"
+                status:
+                  type: string
+                  enum:
+                    - Scheduled
+                    - Cancelled
+                    - Completed
+                    - Live
+                  default: Scheduled
+                  example: "Scheduled"
+      responses:
+        '201':
+          description: Trip created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Trip created successfully"
+                  trip_id:
+                    type: integer
+                    example: 10
+                  status:
+                    type: string
+                    example: "Scheduled"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: Get all scheduled trips for the logged-in operator
+      description: Fetches a list of all upcoming and past trips for buses owned by the operator.
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of trips retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        trip_id:
+                          type: integer
+                        bus_id:
+                          type: integer
+                        bus_number:
+                          type: string
+                        route_name:
+                          type: string
+                        departure_time:
+                          type: string
+                          format: date-time
+                        arrival_time:
+                          type: string
+                          format: date-time
+                        trip_status:
+                          type: string
+                          example: "Scheduled"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /operator/trips/{trip_id}/status:
+    patch:
+      summary: Update the status of a trip
+      description: Allows an operator to mark a trip as 'Live', 'Completed', or 'Cancelled'.
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: trip_id
+          schema:
+            type: integer
+          required: true
+          description: ID of the trip to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [Live, Completed, Cancelled, Scheduled]
+                  description: The new status of the trip
+      responses:
+        '200':
+          description: Trip status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Trip status updated to Live"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Trip not found
+        '500':
+          $ref: '#/components/responses/InternalServerError' 
+
+  /operator/inbox:
+    get:
+      summary: Get Operator Inbox (Active Chat Conversations)
+      description: Returns a list of all active booking chats for the logged-in operator, including the last message and passenger name.
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        bookingId:
+                          type: integer
+                          example: 101
+                        lastMessage:
+                          type: string
+                          example: "Is the bus on time?"
+                        lastSender:
+                          type: string
+                          example: "USER"
+                        lastTime:
+                          type: string
+                          format: date-time
+                        unreadCount:
+                          type: integer
+                          example: 2
+                        passengerName:
+                          type: string
+                          example: "John Doe"
+                        tripDate:
+                          type: string
+                          format: date-time
+                          example: "2026-01-12T10:00:00.000Z"
+                        routeName:
+                          type: string
+                          example: "Dindigul - Coimbatore"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  #User viewing their tickets
+  /bookings/user/{user_id}:
+    get:
+      summary: Get Bookings for the specific user
+      description: Retrieve the list tickets booked by a specific user
+      operationId: getUserBookings
+      tags:
+        - Booking Flow
+      parameters:
+        - in: path
+          name : user_id
+          required: true
+          schema:
+            type: integer
+          description: The ID of the user.
+      responses:
+        '200' :
+          description: List of user Bookings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        trip_id:
+                          type: integer
+                          example: 101
+                        booking_id:
+                          type: integer
+                          example: 9088
+                        ticket_id:
+                          type: string
+                          example: "TKT-9088"
+                        trip_date:
+                          type: string
+                          format: date-time
+                          example: "2025-12-25T12:00:00.000Z"
+                        bus_name:
+                          type: string
+                          example: "Bus Name"
+                        route_name:
+                          type: string
+                          example: "Route Name"
+                        pickup_stop:
+                          type: string
+                          example: "Pickup Stop"
+                        drop_stop:
+                          type: string
+                          example: "Drop Stop"
+                        total_amount:
+                          type: number
+                          example: 1000
+                        booking_status:
+                          type: string
+                          example: "Confirmed"
+                        trip_status:
+                          type: string
+                          example: "Completed"
+                          description: "Status of the trip"
+                        passengers:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              seat_id:
+                                type: integer
+                                example: 205
+                              seat_number:
+                                type: string
+                                example: "L1"
+                              seat_type:
+                                type: string
+                                example: "Sleeper_Lower"
+                              name:
+                                type: string
+                                example: "John Doe"
+                              age:
+                                type: integer
+                                example: 25
+                              gender:
+                                type: string
+                                example: "Male"
+
+        '404':
+          description: User Not Found
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /bookings/{booking_id}/rate:
+    post:
+      summary: Rate a completed trip
+      description: Allows a user to rate a bus journey after completion. Updates the bus's overall rating automatically.
+      tags:
+        - User
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: booking_id
+          schema:
+            type: integer
+          required: true
+          description: The ID of the booking to rate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - stars
+              properties:
+                stars:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                  description: Star rating (Must be between 1 and 5)
+                  example: 5
+                review_text:
+                  type: string
+                  description: Optional feedback about the journey
+                  example: "Great bus, very clean!"
+      responses:
+        '200':
+          description: Rating submitted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Rating submitted successfully"
+                  new_bus_rating:
+                    type: string
+                    example: "4.5"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          description: Rating already exists for this booking
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+                        
+  /admin/add-bus:
+    post:
+      summary: Add a new Bus (Admin Only)
+      description: |
+        Registers a new bus, links it to an Operator, and **automatically generates seats** in the database based on capacity.
+      operationId: addBus
+      tags:
+        - Admin
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BusRequest'
+      responses:
+        '201':
+          description: Bus created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Forbidden - Only Admins can add buses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict - Bus Number already exists
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: "Bus Number TN-01-AB-1234 already exists"
+        '500':
+          $ref: '#/components/responses/InternalServerError'   
+
+  /admin/operators:
+    get:
+      summary: Get all Operators
+      description: Returns a list of all registered operators. Useful for populating dropdowns.
+      operationId: getOperators
+      tags:
+        - Admin
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of operators
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user_id:
+                          type: integer
+                          example: 5
+                        name:
+                          type: string
+                          example: "KPN Travels"
+                        email:
+                          type: string
+                          example: "kpn@example.com"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'                   
+
+  /trips/search:
+    get:
+      summary: Search for available bus trips
+      description: Retrieve a list of bus trips based on source, destination, and travel date with optional filters and sorting.
+      operationId: searchTrips
+      tags:
+        - Public Search
+      parameters:
+        # --- Mandatory Fields ---
+        - in: query
+          name: from
+          schema:
+            type: string
+            example: "Madurai"
+          required: true
+          description: The starting stop name (Source)
+        - in: query
+          name: to
+          schema:
+            type: string
+            example: "Chennai"
+          required: true
+          description: The destination stop name
+        - in: query
+          name: date
+          schema:
+            type: string
+            format: date
+            example: "2025-12-25"
+          required: true
+          description: Travel date in YYYY-MM-DD format
+
+        # --- Optional Filters ---
+        - in: query
+          name: bus_type
+          schema:
+            type: string
+            enum: [AC, Non-AC, Sleeper, Semi-Sleeper, AC Sleeper, Non-AC Seater, Volvo Multi-Axle, AC Seater]
+          required: false
+          description: Filter by specific bus type
+        - in: query
+          name: departure_time
+          schema:
+            type: string
+            example: "18:00:00"
+          required: false
+          description: Filter for buses departing after this time (HH:MM:SS)
+        - in: query
+          name: boarding_point
+          schema:
+            type: string
+          required: false
+          description: Filter by specific boarding point name
+        - in: query
+          name: dropping_point
+          schema:
+            type: string
+          required: false
+          description: Filter by specific dropping point name
+
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number for pagination
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+            maximum: 100
+          description: Number of results per page
+
+        # --- Multi-Sorting (UPDATED) ---
+        - in: query
+          name: sort
+          schema:
+            type: string
+            example: "price:asc,rating:desc"
+          description: |
+             Sort criteria in format `field:order`. Can separate multiple with commas.
+             Allowed fields: price, rating, departure_time, duration.
+             Allowed orders: asc, desc.
+
+        # --- Sorting ---
+        - in: query
+          name: sort_by
+          schema:
+            type: string
+            enum: [price, rating, departure_time]
+            default: departure_time
+          required: false
+          description: Field to sort the results by
+        - in: query
+          name: sort_order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          required: false
+          description: Order of sorting
+
+      responses:
+        '200':
+          description: Successful search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  meta:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      page:
+                        type: integer
+                      limit:
+                        type: integer
+                      totalPages:
+                        type: integer
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BusSearchResult'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /trips/{trip_id}/layout:
+    get:
+      summary: Get Seat Layout for a Trip
+      description: Returns the bus layout with real-time availability. Passes search context for dynamic pricing.
+      operationId: getTripLayout
+      tags:
+        - Public Search
+      parameters:
+        - in: path
+          name: trip_id
+          schema:
+            type: integer
+          required: true
+          description: The ID of the Trip (not the Bus ID)
+        - in: query
+          name: pickup_id
+          schema:
+            type: integer
+          required: false
+          description: ID of the pickup stop (to calculate exact fare)
+        - in: query
+          name: drop_id
+          schema:
+            type: integer
+          required: false
+          description: ID of the drop stop (to calculate exact fare)
+        
+        # --- NEW PARAMETERS START ---
+        - in: query
+          name: from_city
+          schema:
+            type: string
+          required: false
+          description: Origin city name from search (e.g. "coimbatore") to track demand correctly.
+        - in: query
+          name: to_city
+          schema:
+            type: string
+          required: false
+          description: Destination city name from search (e.g. "bangalore") to track demand correctly.
+        # --- NEW PARAMETERS END ---
+
+      responses:
+        '200':
+          description: Layout retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripLayoutResponse'
+        '404':
+          description: Trip not found
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /operator/trips/{trip_id}/passengers:
+    get:
+      summary: Get passenger manifest for a trip
+      description: Returns a list of all confirmed passengers for a specific trip.
+      tags:
+        - Operator
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: trip_id
+          schema:
+            type: integer
+          required: true
+      responses:
+        '200':
+          description: Passenger list retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        booking_id:
+                          type: integer
+                        seat_number:
+                          type: string
+                        passenger_name:
+                          type: string
+                        age:
+                          type: integer
+                        gender:
+                          type: string
+                        contact_number:
+                          type: string
+                          description: "Phone number of the person who booked the ticket"
+                        pickup_point:
+                          type: string
+                        drop_point:
+                          type: string
+                        status:
+                          type: string
+                          example: "Confirmed"
+        '404':
+          description: User Not Found
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  # Booking route
+  /bookings:
+    post:
+      summary: Booking seats for a trip
+      description: |
+        Receives a list passengers and seat selections, checks availability (freezing logic),
+        and creates a confirmed booking.
+      operationId: createBooking
+      tags:
+        - Booking Flow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingRequest'
+      responses:
+        '201':
+          description: Successful booking response.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Booking created successfully"
+                  booking_id:
+                    type: integer
+                    example: 9001
+                  ticket_id:
+                    type: integer
+                    example: 9190
+                  total_amount:
+                    type: integer
+                    example: 1000.00
+                  status:
+                    type: string
+                    example: "Confirmed"
+                  
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '409':
+          description: Conflict - Seats already taken
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Seat Unavailable"
+                  message:
+                    type: string
+                    example: "Seat L1 is already booked by another user."
+        '500':
+          $ref: '#/components/responses/InternalServerError'  
+
+  /bookings/{booking_id}/cancel:
+    patch:
+      summary: Cancel a user's booking
+      description: Cancels a booking if the trip has not started yet.
+      tags:
+        - Booking Flow
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: booking_id
+          schema:
+            type: integer
+          required: true
+          description: The ID of the booking to cancel
+      responses:
+        '200':
+          description: Booking cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Booking cancelled successfully"
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: User Not Found
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /user/travellers:
+    post:
+      summary: Add a Saved Traveller
+      description: Save a passenger's details to the user's profile for quick booking later.
+      operationId: addTraveller
+      tags:
+        - User Profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TravellerRequest'
+      responses:
+        '201':
+          description: Traveller saved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Traveller added successfully"
+                  data:
+                    $ref: '#/components/schemas/TravellerResponse'
+
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      summary: Get All Saved Travellers
+      description: Retrieve the list of family/friends saved by the logged-in user.
+      operationId: getTravellers
+      tags:
+        - User Profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of travellers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TravellerResponse' 
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # operator routes
+  
+  /getBookingsInfo:
+    get:
+      summary: Get Operator Manifest
+      description: |
+        Returns the full manifest for a specific Operator.
+        Data is grouped by Bus -> Trips -> Passengers.
+      operationId: getBookingsInfo
+      tags:
+        - Operator Info
+      parameters:
+        - name: operator_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 1
+          description: The ID of the operator requesting the manifest.
+
+      responses:
+        '200':
+          description: Successful manifest response.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bus:
+                    type: array
+                    description: List of buses found for the operator.
+                    items:
+                      $ref: '#/components/schemas/OperatorBusManifest'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  
+  /api/ai/chat:
+    post:
+      summary: Chat with the AI Assistant
+      description: Sends a user message to the Hugging Face AI and returns a travel-related response.
+      tags:
+        - AI Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+                  example: "What is your refund policy?"
+      responses:
+        '200':
+          description: Successful AI response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply:
+                    type: string
+                    example: "Our refund policy allows a 100% refund if cancelled 24 hours prior."
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /ai/generate-key:
+    post:
+      summary: Generate a secure API Key for the AI Agent
+      description: Generates a new random API key for the logged-in user and saves it to the database. If a key already exists, it overwrites it.
+      tags:
+        - AI
+      security:
+        - bearerAuth: []  # Ensures only logged-in users can generate a key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+              properties:
+                user_id:
+                  type: integer
+                  example: 123
+      responses:
+        '200':
+          description: API Key generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "API Key generated successfully."
+                  apiKey:
+                    type: string
+                    description: The generated secret key (e.g., trv_...)
+                    example: "trv_a1b2c3d4e5f67890"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+  # --- Auth Schemas ---
+    SignupRequest:
+      type: object
+      required: [name, email, password, phone]
+      properties:
+        name:
+          type: string
+          example: "Alice"
+        email:
+          type: string
+          format: email
+          example: "alice@example.com"
+        password:
+          type: string
+          format: password
+          example: "secret123"
+        phone:
+          type: string
+          example: "9876543210"
+
+    
+    BusRequest:
+      type: object
+      required:
+        - bus_number
+        - operator_id
+        - total_seats
+        - bus_type
+      properties:
+        bus_number:
+          type: string
+          description: The bus registration number.
+          example: "KA 12 AB 1234"
+        operator_id:
+          type: integer
+          description: user id of the operator.
+          example: 1
+        total_seats:
+          type: integer
+          description: Total capacity of the bus.
+          example: 50
+          minimum: 10
+          maximum: 60
+        bus_type:
+          type: string
+          enum: ['AC', 'Non-AC','Sleeper','Semi-Sleeper''AC Sleeper','Non-AC Seater','Volvo Multi-Axle','AC Seater']
+          example: "AC"
+
+    BusResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Bus added and 40 seats generated successfully"
+        bus:
+          $ref: '#/components/schemas/Bus'
+
+    # --- Bus Schema ---
+    Bus:
+      type: object
+      properties:
+        bus_id:
+          type: integer
+          example: 1
+        bus_number:
+          type: string
+          example: "TN-01-AB-1234"
+        operator_id:
+          type: integer
+          example: 5
+        total_seats:
+          type: integer
+          example: 40
+        bus_type:
+          type: string
+          example: "AC Sleeper"
+        rating:
+          type: number
+          format: float
+          example: 0.0
+        total_ratings:
+          type: integer
+          example: 0
+
+    # --- Operator Management Schemas ---
+    SeatUpdateItem:
+      type: object
+      required:
+        - seat_numbers
+      properties:
+        seat_numbers:
+          type: array
+          description: List of seat numbers to apply the changes to
+          items:
+            type: string
+          example: ["S1", "S2", "S3", "S4"]
+        price:
+          type: number
+          format: float
+          description: New price for this seat
+          example: 550.00
+        seat_type:
+          type: string
+          enum: ['Seater', 'Sleeper_Upper', 'Sleeper_Lower']
+          example: "Sleeper_Lower"
+        status:
+          type: string
+          enum: ['good', 'repair', 'maintenance', 'damaged']
+          example: "good"
+
+    UpdateSeatsRequest:
+      type: object
+      required:
+        - seats
+      properties:
+        updates:
+          type: array
+          description: List of seat updates to apply
+          items:
+            $ref: '#/components/schemas/SeatUpdateItem'
+
+    UpdateSeatsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Successfully updated 10 seats"
+
+    # --- Route Management Schemas ---
+    RouteStopRequest:
+      type: object
+      required:
+        - stop_name
+        - order_id
+        - stop_type
+      properties:
+        stop_name:
+          type: string
+          example: "Vellore"
+        order_id:
+          type: integer
+          example: 1
+        distance:
+          type: number
+          description: Distance from source
+          example: 140.5
+        price:
+          type: number
+          description: Price from source to this stop
+          example: 300.00
+        estimated_time:
+          type: string
+          description: E.g., "2 hrs 30 mins"
+          example: "2h 30m"
+        stop_type:
+          type: string
+          enum: ['Boarding', 'Dropping', 'Both']
+          example: "Boarding"
+
+    RouteRequest:
+      type: object
+      required:
+        - route_name
+        - total_distance
+        - estimated_time
+        - stops
+      properties:
+        route_name:
+          type: string
+          description: E.g., "Chennai - Bangalore"
+          example: "Chennai - Bangalore"
+        total_distance:
+          type: number
+          example: 350.00
+        estimated_time:
+          type: string
+          example: "6h 00m"
+        stops:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteStopRequest'
+
+    RouteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Route created successfully with 2 stops"
+        route_id:
+          type: integer
+          example: 201
+
+    # --- Trip Management ---
+    TripRequest:
+      type: object
+      required:
+        - bus_id
+        - route_id
+        - departure_time
+        - arrival_time
+      properties:
+        bus_id:
+          type: integer
+          description: The ID of the bus running this trip
+          example: 101
+        route_id:
+          type: integer
+          description: The ID of the route to follow
+          example: 5
+        departure_time:
+          type: string
+          format: date-time
+          description: Start time (YYYY-MM-DDTHH:mm:ssZ)
+          example: "2025-12-25T21:00:00Z"
+        arrival_time:
+          type: string
+          format: date-time
+          description: End time (YYYY-MM-DDTHH:mm:ssZ)
+          example: "2025-12-26T06:00:00Z"
+        status:
+          type: string
+          enum: ['Scheduled', 'Cancelled', 'Completed']
+          default: 'Scheduled'
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "alice@example.com"
+        password:
+          type: string
+          format: password
+          example: "secret123"
+
+    # --- Passenger Seat View ---
+    SeatLayoutPassenger:
+      type: object
+      properties:
+        seat_id:
+          type: integer
+          example: 15
+        seat_number:
+          type: string
+          example: "U5"
+        seat_type:
+          type: string
+          example: "Sleeper"
+        price:
+          type: number
+          example: 850.00
+        status:
+          type: string
+          enum: ['AVAILABLE', 'BOOKED']
+          example: "AVAILABLE"
+
+    TripLayoutResponse:
+      type: object
+      properties:
+        trip_id:
+          type: integer
+        bus_id:
+          type: integer
+        bus_type:
+          type: string
+        seats:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeatLayoutPassenger'
+        boarding_points:
+          type: array
+          items:
+            type: object
+            properties:
+              stop_id:
+                type: integer
+              stop_name:
+                type: string
+              time:
+                type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "Login Successful"
+        token:
+          type: string
+          description: "The JWT Token to use for future requests"
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        user:
+          type: object
+          properties:
+            user_id:
+              type: integer
+              example: 15
+            name:
+              type: string
+              example: "Alice"
+            email:
+              type: string
+              example: "alice@example.com"
+    # --- New Schema for Search Results ---
+    BusSearchResult:
+      type: object
+      properties:
+        bus_name:
+          type: string
+          example: "KPN Travels"
+        bus_id:
+          type: integer
+          example: 101
+        stops:
+          type: array
+          items:
+            type: string
+          description: List of all stops on this route
+          example: ["Madurai", "Trichy", "Villupuram", "Chennai"]
+        trip_id:
+          type: integer
+          example: 505
+        trip_date:
+          type: string
+          format: date
+          example: "2025-12-25"
+        path_id:
+          type: integer
+          example: 20
+        rating:
+          type: number
+          format: float
+          example: 4.5
+        departure_time:
+          type: string
+          description: Estimated departure time at the user's pickup point
+          example: "2025-12-25T18:30:00.000Z"
+        arrival_time:
+          type: string
+          description: Estimated arrival time at the user's drop point
+          example: "2025-12-26T06:00:00.000Z"
+        distance:
+          type: number
+          description: Distance in KM between pickup and drop
+          example: 450.5
+        price:
+          type: number
+          description: Ticket cost for this specific leg of the journey
+          example: 850.00
+        available_seats:
+          type: integer
+          example: 12
+        bus_type:
+            type: string
+            example: "AC Sleeper"
+
+    
+    #Booking Request
+    BookingRequest:
+      type: object
+      required: [user_id, trip_id, pickup_stop_id, drop_stop_id, passengers]
+      properties:
+        user_id:
+          type: integer
+          description: Id of the user making the booking
+          example : 101
+        trip_id:
+          type: integer
+          description: Id of the trip they are booking
+          example : 505
+        pickup_stop_id:
+          type: integer
+          description: Id of the pickup stop
+          example : 10
+        drop_stop_id:
+          type: integer
+          description: Id of the drop stop
+          example : 20
+        passengers:
+          type: array
+          description: List of passengers on this bus and their assigned seats.
+          minItems: 1
+          items:
+            type: object
+            required: [name, age, gender, seat_number, seat_id]
+            properties:
+              name:
+                type: string
+                example: "Rajesh Kumar"
+              age:
+                type: integer
+                example: 25
+              gender:
+                type: string
+                enum: ["Male", "Female", "Other"]
+                example: "Male"
+              seat_number:
+                type: string
+                description: Visual Seat number 
+                example: "A1"
+              seat_id:
+                type: integer
+                description: Database Id of the seat
+                example: 101
+
+
+    # --- Saved Travellers ---
+    TravellerRequest:
+      type: object
+      required:
+        - name
+        - age
+        - gender
+      properties:
+        name:
+          type: string
+          example: "Mom"
+        age:
+          type: integer
+          example: 45
+        gender:
+          type: string
+          enum: [Male, Female, Other]
+          example: "Female"
+
+    TravellerResponse:
+      type: object
+      properties:
+        traveller_id:
+          type: integer
+          example: 10
+        name:
+          type: string
+          example: "Mom"
+        age:
+          type: integer
+          example: 45
+        gender:
+          type: string
+          example: "Female"
+    # --- Refactored Schema for Operator Manifest (Extracted for cleanliness) ---
+    OperatorBusManifest:
+      type: object
+      properties:
+        bus_type:
+          type: string
+          example: "AC Sleeper"
+        bus_number:
+          type: string
+          example: "TN-01-AA-1001"
+        passengers_list:
+          type: array
+          description: List of passengers on this bus.
+          items:
+            type: object
+            properties:
+              trip_id:
+                type: integer
+                example: 5001
+              ticket_id:
+                type: integer
+                example: 9001
+              booking_id:
+                type: integer
+                example: 1001
+              passenger_name:
+                type: string
+                example: "Rajesh Kumar"
+              seat_number:
+                type: string
+                example: "A1"
+              seat_condition:
+                type: string
+                enum: [good, repair, maintenance, damaged]
+                example: "good"
+              contact_number:
+                type: string
+                example: "9876543210"
+              route_name:
+                type: string
+                example: "Chennai - Madurai"
+              pickup_point:
+                type: string
+                example: "Chennai Koyambedu"
+              drop_point:
+                type: string
+                example: "Madurai Mattuthavani"
+              departure_time:
+                type: string
+                format: date-time
+                example: "2025-12-10 21:00:00.000000"
+              booking_date:
+                type: string
+                format: date-time
+                example: "2025-12-01 10:00:00.000000"
+              booking_status:
+                type: string
+                example: "Confirmed"
+              amount_paid:
+                type: number
+                format: float
+                example: 600.0
+              total_trip_bookings:
+                type: integer
+                description: Total passengers on this specific trip.
+                example: 3
+
+    
+
+    # --- Shared Error Schemas ---
+    ErrorResponse:
+      type: object
+      description: Standard error wrapper for all non-2xx responses.
+      properties:
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: "Bad Request"
+        message:
+          type: string
+          example: "Invalid date format."
+        code:
+          type: string
+          example: "VAL_001"
+      required: [status, error, message]
+
+  responses:
+    BadRequestError:
+      description: Bad Request – Invalid inputs (e.g., date format or missing ID).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    UnauthorizedError:
+      description: Unauthorized – missing or invalid authentication credentials.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    ForbiddenError:
+      description: Forbidden – authenticated but not allowed to access this resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InternalServerError:
+      description: Internal server error – unexpected condition on the server.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

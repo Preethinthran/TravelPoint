@@ -1,0 +1,10 @@
+model seat {
+  seat_id     Int             @id @default(autoincrement())
+  bus_id      Int
+  seat_number String?         @db.VarChar(10)
+  seat_type   seat_seat_type?
+  price       Decimal?        @db.Decimal(10, 2)
+  status      seat_status?    @default(good)
+
+  @@index([bus_id], map: "fk_seat_bus")
+}

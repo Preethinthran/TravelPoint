@@ -1,0 +1,11 @@
+model service {
+  request_id Int             @id @default(autoincrement())
+  user_id    Int
+  agent_id   Int?
+  message    String?         @db.Text
+  status     service_status? @default(Open)
+  created_at DateTime?       @default(now()) @db.DateTime(0)
+
+  @@index([agent_id], map: "fk_service_agent")
+  @@index([user_id], map: "fk_service_user")
+}

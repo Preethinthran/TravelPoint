@@ -1,0 +1,9 @@
+model bus {
+  bus_id      Int           @id @default(autoincrement())
+  bus_number  String        @unique(map: "bus_number") @db.VarChar(20)
+  operator_id Int
+  total_seats Int
+  bus_type    bus_bus_type?
+
+  @@index([operator_id], map: "fk_bus_operator")
+}

@@ -1,0 +1,7 @@
+model users {
+  user_id Int         @id @default(autoincrement())
+  name    String      @db.VarChar(100)
+  email   String      @unique(map: "email") @db.VarChar(100)
+  phone   String      @unique(map: "phone") @db.VarChar(20)
+  role    users_role? @default(passenger)
+}

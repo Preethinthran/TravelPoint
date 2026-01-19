@@ -1,0 +1,11 @@
+model stops {
+  stop_id        Int      @id @default(autoincrement())
+  path_id        Int
+  stop_name      String   @db.VarChar(100)
+  order_id       Int
+  distance       Decimal? @db.Decimal(10, 2)
+  price          Decimal? @db.Decimal(10, 2)
+  estimated_time String?  @db.VarChar(50)
+
+  @@index([path_id], map: "fk_stops_route")
+}

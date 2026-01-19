@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model booked_seats {
+  ticket_id        Int    @id @default(autoincrement())
+  booking_id       Int
+  seat_id          Int
+  passenger_name   String @db.VarChar(100)
+  passenger_age    Int
+  passenger_gender String @db.VarChar(10)
+  seat_number      String @db.VarChar(10)
+
+  @@index([booking_id], map: "fk_booked_booking")
+  @@index([seat_id], map: "fk_booked_seat")
+}
+
+model bookings {
+  booking_id     Int                      @id @default(autoincrement())
+  passenger_id   Int
+  trip_id        Int
+  pickup_stop_id Int
+  drop_stop_id   Int
+  booking_date   DateTime?                @default(now()) @db.DateTime(0)
+  amount_paid    Decimal                  @db.Decimal(10, 2)
+  booking_status bookings_booking_status? @default(Confirmed)
+
+  reviews        BusReview?
+
+  @@index([drop_stop_id], map: "fk_bookings_drop")
+  @@index([passenger_id], map: "fk_bookings_passenger")
+  @@index([pickup_stop_id], map: "fk_bookings_pickup")
+  @@index([trip_id], map: "fk_bookings_trip")
+}
+
+model bus {
+  bus_id        Int           @id @default(autoincrement())
+  bus_number    String        @unique(map: "bus_number") @db.VarChar(20)
+  operator_id   Int
+  total_seats   Int
+  bus_type      bus_bus_type?
+  rating        Decimal?      @default(0.0) @db.Decimal(3, 1)
+  total_ratings Int           @default(0)
+
+  reviews BusReview[]
+
+  @@index([operator_id], map: "fk_bus_operator")
+}
+
+model route {
+  path_id        Int      @id @default(autoincrement())
+  route_name     String   @db.VarChar(100)
+  total_distance Decimal? @db.Decimal(10, 2)
+  estimated_time String?  @db.VarChar(50)
+  operator_id    Int
+
+  @@index([operator_id], map: "route_operator_id_fkey")
+}
+
+model seat {
+  seat_id     Int             @id @default(autoincrement())
+  bus_id      Int
+  seat_number String?         @db.VarChar(10)
+  seat_type   seat_seat_type?
+  price       Decimal?        @db.Decimal(10, 2)
+  status      seat_status?    @default(good)
+
+  @@index([bus_id], map: "fk_seat_bus")
+}
+
+model service {
+  request_id Int             @id @default(autoincrement())
+  user_id    Int
+  agent_id   Int?
+  message    String?         @db.Text
+  status     service_status? @default(Open)
+  created_at DateTime?       @default(now()) @db.DateTime(0)
+
+  @@index([agent_id], map: "fk_service_agent")
+  @@index([user_id], map: "fk_service_user")
+}
+
+model stops {
+  stop_id        Int       @id @default(autoincrement())
+  path_id        Int
+  stop_name      String    @db.VarChar(100)
+  order_id       Int
+  distance       Decimal?  @db.Decimal(10, 2)
+  price          Decimal?  @db.Decimal(10, 2)
+  estimated_time String?   @db.VarChar(50)
+  stop_type      stop_type @default(Both)
+
+  @@index([path_id], map: "fk_stops_route")
+}
+
+model trips {
+  trip_id        Int          @id @default(autoincrement())
+  bus_id         Int
+  path_id        Int
+  departure_time DateTime     @db.DateTime(0)
+  arrival_time   DateTime     @db.DateTime(0)
+  status         trips_status @default(Scheduled)
+
+  @@index([bus_id], map: "fk_trips_bus")
+  @@index([path_id], map: "fk_trips_route")
+}
+
+model users {
+  user_id    Int         @id @default(autoincrement())
+  name       String      @db.VarChar(100)
+  email      String      @unique(map: "email") @db.VarChar(100)
+  phone      String      @unique(map: "phone") @db.VarChar(20)
+  role       users_role? @default(passenger)
+  last_login DateTime?
+  password   String      @db.VarChar(100)
+  token      String?     @db.Text
+  apiKey     String?     @unique @map("api_key")
+
+  saved_travellers saved_travellers[]
+  reviews  BusReview[]
+}
+
+model saved_travellers{
+  traveller_id Int @id @default(autoincrement())
+  user_id Int
+  name String @db.VarChar(100)
+  age Int
+  gender Gender
+  created_at DateTime @default(now()) 
+
+  user  users @relation(fields: [user_id], references: [user_id])
+  @@index([user_id], map: "fk_saved_travellers_user")
+}
+
+model BusReview {
+  review_id   Int      @id @default(autoincrement())
+  stars       Int      // 1 to 5
+  review_text String?  @db.Text
+  created_at  DateTime @default(now())
+
+  // Relations
+  booking_id  Int      @unique // @unique ensures one review per ticket
+  booking     bookings @relation(fields: [booking_id], references: [booking_id])
+
+  bus_id      Int
+  bus         bus      @relation(fields: [bus_id], references: [bus_id])
+
+  user_id     Int
+  user        users    @relation(fields: [user_id], references: [user_id])
+
+  @@map("bus_reviews") // Map to the actual table name 'bus_reviews'
+}
+
+enum seat_seat_type {
+  Seater
+  Sleeper_Upper
+  Sleeper_Lower
+}
+
+enum service_status {
+  Open
+  In_Progress @map("In Progress")
+  Resolved
+  Closed
+}
+
+enum users_role {
+  passenger
+  admin
+  agent
+  operator
+}
+
+enum seat_status {
+  good
+  repair
+  maintenance
+  damaged
+}
+
+enum bookings_booking_status {
+  Confirmed
+  Cancelled
+  Pending
+}
+
+enum bus_bus_type {
+  AC
+  Non_AC           @map("Non-AC")
+  Sleeper
+  Semi_Sleeper     @map("Semi-Sleeper")
+  AC_Sleeper       @map("AC Sleeper")
+  Non_AC_Seater    @map("Non-AC Seater")
+  Volvo_Multi_Axle @map("Volvo Multi-Axle")
+  AC_Seater        @map("AC Seater")
+}
+
+enum stop_type {
+  Boarding
+  Dropping
+  Both
+}
+
+enum trips_status {
+  Scheduled
+  Cancelled
+  Completed
+  Live
+}
+
+enum Gender {
+  Male
+  Female
+  Other
+}

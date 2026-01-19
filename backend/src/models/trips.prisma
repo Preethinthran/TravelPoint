@@ -1,0 +1,10 @@
+model trips {
+  trip_id        Int      @id @default(autoincrement())
+  bus_id         Int
+  path_id        Int
+  departure_time DateTime @db.DateTime(0)
+  arrival_time   DateTime @db.DateTime(0)
+
+  @@index([bus_id], map: "fk_trips_bus")
+  @@index([path_id], map: "fk_trips_route")
+}

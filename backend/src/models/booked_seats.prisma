@@ -1,0 +1,9 @@
+model booked_seats {
+  ticket_id      Int     @id @default(autoincrement())
+  booking_id     Int
+  seat_id        Int
+  passenger_name String? @db.VarChar(100)
+
+  @@index([booking_id], map: "fk_booked_booking")
+  @@index([seat_id], map: "fk_booked_seat")
+}
