@@ -118,9 +118,39 @@ export const ChatWindow = ({
             setIsTyping(true);
 
             try {
+                const userDataString = localStorage.getItem('user_data');
+                
+                if (!userDataString) {
+                    setMessages(prev => [...prev, {
+                        sender_role: 'bot',
+                        message: "⚠️ Please log in to use the AI Assistant.",
+                        created_at: new Date().toISOString()
+                    }]);
+                    setIsTyping(false);
+                    return;
+                }
+
+                const userData = JSON.parse(userDataString);
+                const token = userData?.token;
+                
+                if (!token || token === 'null' || token === 'undefined') {
+                    setMessages(prev => [...prev, {
+                        sender_role: 'bot',
+                        message: "⚠️ Your session has expired. Please log in again.",
+                        created_at: new Date().toISOString()
+                    }]);
+                    setIsTyping(false);
+                    return;
+                }
+
+                console.log("🔵 Sending AI request with token:", token.substring(0, 20) + "...");
+
                 const response = await fetch('http://localhost:3000/api/ai/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
                     body: JSON.stringify({ message: text })
                 });
 
