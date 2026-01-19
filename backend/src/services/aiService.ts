@@ -1,12 +1,44 @@
 import { HfInference } from "@huggingface/inference";
-import { bookingTools } from "./bookingTools"; 
+import { bookingTools } from "./bookingTools";
 import dotenv from "dotenv";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 dotenv.config();
 
 const hf = new HfInference(process.env.HUGGING_FACE_API_KEY);
 
-// Enhanced system instruction with XML structure and few-shot examples
+// --- MCP CLIENT SETUP ---
+let mcpClient: Client | null = null;
+let mcpToolsOrchestration: any[] = [];
+
+async function connectToMcpServer() {
+    if (mcpClient) return mcpClient;
+    try {
+        const transport = new StdioClientTransport({
+            command: "npx",
+            args: ["-y", "mcp-google-calendar"]
+        });
+        const client = new Client({ name: "TravelPoint-Client", version: "1.0.0" }, { capabilities: {} });
+
+        // Add timeout to prevent hanging if server awaits auth
+        const connectionPromise = client.connect(transport);
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("MCP Connection Timed Out - Check if credentials.json is missing")), 5000)
+        );
+
+        await Promise.race([connectionPromise, timeoutPromise]);
+
+        mcpClient = client;
+        const result = await client.listTools();
+        mcpToolsOrchestration = result.tools;
+        console.log(`✅ MCP Connected. Tools found: ${result.tools.length}`);
+    } catch (e: any) {
+        console.error("❌ MCP Connection Failed (Non-fatal):", e.message);
+        console.warn("ℹ️  Note: mcp-google-calendar requires a credentials.json file/env var to function.");
+    }
+}
+
 const SYSTEM_INSTRUCTION = `You are the Travel Point AI Assistant. You help users with bus bookings.
 
 <tools>
@@ -52,191 +84,133 @@ CRITICAL RULES:
 To call a tool, reply with ONLY valid JSON in this EXACT format:
 {"tool": "tool_name", "args": {"paramName": value}}
 
-EXAMPLES:
-User: "Check ticket 5 status"
-Assistant: {"tool": "get_booking_details", "args": {"bookingId": 5}}
-
-User: "What's the status of booking number 2?"
-Assistant: {"tool": "get_booking_details", "args": {"bookingId": 2}}
-
-User: "Search buses to Coimbatore"
-Assistant: {"tool": "search_trips", "args": {"query": "Coimbatore"}}
-
-User: "Cancel my ticket 3"
-Assistant: {"tool": "cancel_booking", "args": {"bookingId": 3}}
-
 If the user is just chatting (hello, thanks, etc), reply normally without JSON.
 </instructions>
 `;
 
 /**
- * Enhanced JSON extraction with better pattern matching
+ * Helper to strip markdown and find the JSON object
  */
-const extractJson = (text: string): string | null => {
-    // Remove markdown code blocks and extra whitespace
-    let clean = text
-        .replace(/```json\s*/g, "")
-        .replace(/```\s*/g, "")
-        .replace(/\r\n/g, "\n")  // Normalize line endings
-        .replace(/[\x00-\x1F\x7F]/g, "") // Remove control characters
-        .trim();
-    
-    console.log("🔍 Cleaned text:", clean.substring(0, 100));
-    
-    // Try multiple extraction strategies
-    // Strategy 1: Find complete JSON object with balanced braces
+const cleanJson = (text: string): string => {
+    // Remove markdown code blocks if present
+    let clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    // Find the first '{' and last '}'
     const start = clean.indexOf('{');
     const end = clean.lastIndexOf('}');
-    
-    if (start !== -1 && end !== -1 && end > start) {
-        const jsonStr = clean.substring(start, end + 1);
-        
-        // Clean up any potential issues
-        const finalJson = jsonStr
-            .replace(/\n/g, " ")  // Remove newlines
-            .replace(/\s+/g, " ")  // Normalize spaces
-            .trim();
-            
-        console.log("📦 Extracted JSON:", finalJson);
-        return finalJson;
+    if (start !== -1 && end !== -1) {
+        return clean.substring(start, end + 1);
     }
-    
-    return null;
-};
-
-/**
- * Validate JSON structure for tool call
- */
-const isValidToolCall = (obj: any): boolean => {
-    return (
-        obj &&
-        typeof obj === 'object' &&
-        typeof obj.tool === 'string' &&
-        obj.args &&
-        typeof obj.args === 'object'
-    );
+    return clean;
 };
 
 export const generateAIResponse = async (userMessage: string, userId: number = 1) => {
-    console.log("🟢 generateAIResponse called with:", userMessage);
-    
-    // Use better models trained for instruction following and function calling
-    const models = [
-        'mistralai/Mixtral-8x7B-Instruct-v0.1',    // Excellent at JSON format
-        'NousResearch/Hermes-2-Pro-Mistral-7B',    // Trained for function calling
-        'meta-llama/Meta-Llama-3-8B-Instruct'      // Fallback
-    ];
+    // 1. Ensure MCP Connection
+    await connectToMcpServer();
 
-    let lastError = null;
+    // 2. Prepare dynamic instruction
+    let currentInstructions = SYSTEM_INSTRUCTION;
+
+    if (mcpToolsOrchestration.length > 0) {
+        currentInstructions += "\n<external_mcp_tools>\n";
+        mcpToolsOrchestration.forEach((t: any) => {
+            currentInstructions += `  <tool name="${t.name}">\n`;
+            currentInstructions += `    <description>${t.description}</description>\n`;
+            // Simplify params for demo
+            currentInstructions += `    <parameters>${Object.keys(t.inputSchema?.properties || {}).join(", ")}</parameters>\n`;
+            currentInstructions += `  </tool>\n`;
+        });
+        currentInstructions += "</external_mcp_tools>\n";
+    }
+
+    // 3. Try Meta Llama 3 first (Smarter), then Phi-3 (Backup)
+    const models = ['meta-llama/Meta-Llama-3-8B-Instruct', 'microsoft/Phi-3-mini-4k-instruct'];
 
     for (const model of models) {
         try {
-            console.log(`🤖 Trying model: ${model}`);
-            
-            // A. Initial Request with enhanced prompt
+            // A. Initial Request
             const response = await hf.chatCompletion({
                 model: model,
                 messages: [
-                    { role: "system", content: SYSTEM_INSTRUCTION },
+                    { role: "system", content: currentInstructions },
                     { role: "user", content: userMessage }
                 ],
-                max_tokens: 500,
-                temperature: 0.1, // Low temp for precise tool calling
+                max_tokens: 300,
+                temperature: 0.1 // Low temp = strict logic
             });
 
             const content = response.choices[0]?.message?.content || "";
-            console.log(`📝 Model response: ${content}`);
 
-            // B. Check for Tool Call with improved detection
-            const jsonStr = extractJson(content);
-            
-            if (jsonStr) {
-                console.log(`🛠️ Detected potential tool call`);
-                
+            // B. Check for Tool Call (Robust Regex)
+            if (content.match(/\{\s*"tool"\s*:/)) {
+                console.log(`🛠️ AI (${model}) wants to use a tool...`);
+
                 try {
+                    // CLEAN the JSON before parsing (Fixes the error you saw)
+                    const jsonStr = cleanJson(content);
                     const toolCall = JSON.parse(jsonStr);
-                    
-                    // Validate the tool call structure
-                    if (!isValidToolCall(toolCall)) {
-                        console.warn("⚠️ Invalid tool call structure, treating as normal response");
-                        return content;
-                    }
-                    
                     let toolResult = "";
-                    console.log(`✅ Valid tool call: ${toolCall.tool}`);
 
-                    // C. Execute the appropriate tool
-                    switch (toolCall.tool) {
-                        case "search_trips":
-                            toolResult = await bookingTools.searchTrips(toolCall.args.query);
-                            break;
-                        
-                        case "get_booking_details":
-                            const bookingId = parseInt(toolCall.args.bookingId);
-                            if (isNaN(bookingId)) {
-                                return "I need a valid booking ID number to check the status.";
-                            }
-                            toolResult = await bookingTools.getBookingDetails(bookingId);
-                            break;
-                        
-                        case "cancel_booking":
-                            const cancelId = parseInt(toolCall.args.bookingId);
-                            if (isNaN(cancelId)) {
-                                return "I need a valid booking ID number to cancel.";
-                            }
-                            toolResult = await bookingTools.cancelTicket(cancelId);
-                            break;
-                        
-                        case "book_ticket":
-                            toolResult = await bookingTools.bookTicket(
-                                toolCall.args.tripId,
-                                userId,
-                                toolCall.args.pickupId,
-                                toolCall.args.dropId,
-                                toolCall.args.amount
-                            );
-                            break;
-                        
-                        default:
-                            console.warn(`⚠️ Unknown tool: ${toolCall.tool}`);
-                            return "I couldn't understand which action to perform. Could you rephrase?";
+                    console.log("Tool Selected:", toolCall.tool);
+
+                    // Execute Logic
+                    if (toolCall.tool === "search_trips") {
+                        toolResult = await bookingTools.searchTrips(toolCall.args.query);
+                    }
+                    else if (toolCall.tool === "get_booking_details") {
+                        toolResult = await bookingTools.getBookingDetails(toolCall.args.bookingId);
+                    }
+                    else if (toolCall.tool === "cancel_booking") {
+                        toolResult = await bookingTools.cancelTicket(toolCall.args.bookingId);
+                    }
+                    else if (toolCall.tool === "book_ticket") {
+                        toolResult = await bookingTools.bookTicket(
+                            toolCall.args.tripId,
+                            userId,
+                            toolCall.args.pickupId,
+                            toolCall.args.dropId,
+                            toolCall.args.amount
+                        );
+                    }
+                    // --- MCP TOOLS DELEGATION ---
+                    else if (mcpClient && mcpToolsOrchestration.some((t: any) => t.name === toolCall.tool)) {
+                        console.log(`📡 Calling MCP Tool: ${toolCall.tool}`);
+                        try {
+                            const mcpRes = await mcpClient.callTool({
+                                name: toolCall.tool,
+                                arguments: toolCall.args
+                            });
+                            toolResult = JSON.stringify(mcpRes);
+                        } catch (err: any) {
+                            toolResult = "Error calling MCP tool: " + err.message;
+                        }
                     }
 
-                    console.log(`📊 Tool result: ${toolResult.substring(0, 100)}...`);
-
-                    // D. Feed result back to AI for natural response
+                    // C. Feed result back to AI
                     const finalResponse = await hf.chatCompletion({
                         model: model,
                         messages: [
-                            { role: "system", content: "You are a helpful travel assistant. Summarize the tool result in a friendly, conversational way." },
+                            { role: "system", content: currentInstructions },
                             { role: "user", content: userMessage },
-                            { role: "assistant", content: jsonStr }, 
-                            { role: "user", content: `Tool returned: ${toolResult}\n\nPlease provide a clear, friendly response to the user based on this information.` }
+                            { role: "assistant", content: jsonStr },
+                            { role: "user", content: `Tool Output: ${toolResult}. Please tell me what you did.` }
                         ],
-                        max_tokens: 400,
-                        temperature: 0.3 // Slightly higher for natural language
+                        max_tokens: 300
                     });
 
-                    return finalResponse.choices[0]?.message?.content || toolResult;
+                    return finalResponse.choices[0]?.message?.content;
 
-                } catch (parseError) {
-                    console.error("❌ JSON Parse Error:", parseError);
-                    // If JSON parsing fails, treat as normal response
-                    return content;
+                } catch (e) {
+                    console.error("❌ Tool Processing Error:", e);
+                    // FALLBACK: Don't show JSON to user. Show a polite error.
+                    return "I attempted to process your request, but I encountered a technical issue. Please try again.";
                 }
             }
 
-            // E. No tool call detected - return conversational response
             return content;
 
-        } catch (error: any) {
-            console.warn(`⚠️ Model ${model} failed:`, error.message);
-            lastError = error;
-            continue; // Try next model
+        } catch (error) {
+            console.warn(`Retry ${model}...`);
         }
     }
-
-    // All models failed
-    console.error("❌ All models failed:", lastError);
-    return "I'm having trouble processing your request right now. Please try again in a moment.";
+    return "I am currently experiencing high traffic. Please try again later.";
 };
