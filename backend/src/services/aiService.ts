@@ -119,7 +119,7 @@ const extractJson = (text: string): string | null => {
         console.log("📦 Extracted JSON:", finalJson);
         return finalJson;
     }
-    return clean;
+    return null;
 };
 
 export const generateAIResponse = async (userMessage: string, userId: number = 1) => {

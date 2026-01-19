@@ -106,7 +106,17 @@ export const bookingTools = {
             t.status = 'Scheduled'
             AND t.departure_time > NOW()
             AND s1.order_id < s2.order_id  -- Source must come BEFORE destination
-          GROUP BY t.trip_id
+          GROUP BY 
+            t.trip_id, 
+            t.departure_time, 
+            t.arrival_time, 
+            r.route_name, 
+            b.bus_number, 
+            b.bus_type, 
+            s1.stop_name, 
+            s1.order_id, 
+            s2.stop_name, 
+            s2.order_id
           ORDER BY t.departure_time ASC
           LIMIT 10
         `;

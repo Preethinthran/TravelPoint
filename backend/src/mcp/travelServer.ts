@@ -109,8 +109,32 @@ server.tool(
     query: z.string().describe("The city name or bus type") 
   },
   async ({ query }) => {
-    const result = await bookingTools.searchTrips(query);
-    return { content: [{ type: "text", text: result }] };
+    try {
+      console.error(`🔍 MCP search_trips called with query: "${query}"`);
+      
+      // Test database connection first
+      try {
+        await pool.query('SELECT 1');
+        console.error('✅ Database connection OK');
+      } catch (dbError: any) {
+        console.error('❌ Database connection failed:', dbError.message);
+        console.error('Environment check:', {
+          DB_HOST: process.env.DB_HOST || 'MISSING',
+          DB_PORT: process.env.DB_PORT || 'MISSING',
+          DB_USER: process.env.DB_USER || 'MISSING',
+          DB_NAME: process.env.DB_NAME || 'MISSING'
+        });
+        throw new Error(`Database connection error: ${dbError.message}`);
+      }
+      
+      const result = await bookingTools.searchTrips(query);
+      console.error(`✅ Search completed, result length: ${result.length} chars`);
+      return { content: [{ type: "text", text: result }] };
+    } catch (error: any) {
+      console.error('❌ search_trips tool error:', error);
+      const errorMsg = `Search failed: ${error.message || 'Unknown error'}. Please check the MCP server logs for details.`;
+      return { content: [{ type: "text", text: errorMsg }], isError: true };
+    }
   }
 );
 

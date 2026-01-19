@@ -1,10 +1,11 @@
 import multer from 'multer';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
 
 // 1. Configure where to save the file
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
+    // Save files in a 'uploads' folder in your project root
     const uploadPath = 'uploads/';
     
     // Create the folder if it doesn't exist
@@ -15,7 +16,7 @@ const storage = multer.diskStorage({
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
-    // Save as: timestamp-filename.csv
+    // Save as: timestamp-filename.csv (to prevent duplicate names)
     cb(null, `${Date.now()}-${file.originalname}`);
   },
 });

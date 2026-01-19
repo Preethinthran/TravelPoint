@@ -16,6 +16,7 @@ import path from 'path';
 import connectMongoDB from './config/mongoConfig';
 import { setupSocketIO } from './sockets/socketHandler';
 import aiRoutes from './routes/aiRoutes';
+import uploadRoutes from './routes/uploadRoutes';
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use("/api/trips", layoutRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use('/api/operator', seatRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Swagger
 const swaggerDocument = yaml.load(path.join(__dirname, './docs/openapi.yaml'));

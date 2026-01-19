@@ -1332,6 +1332,46 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/upload/upload-csv:
+    post:
+      summary: Bulk Upload Routes via CSV
+      description: Allows Operators to upload a CSV file containing routes and stops. The system groups rows by route name and creates them transactionally.
+      tags:
+        - Routes
+      security:
+        - bearerAuth: [] 
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The CSV file containing route details.
+      responses:
+        '200':
+          description: Upload successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Successfully uploaded 2 routes and their stops."
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
   securitySchemes:
     BearerAuth:
