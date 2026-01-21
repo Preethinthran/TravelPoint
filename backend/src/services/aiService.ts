@@ -215,7 +215,25 @@ To call a tool, reply with ONLY valid JSON in this EXACT format:
 {"tool": "tool_name", "args": {"paramName": value}}
 
 If the user is just chatting (hello, thanks, etc), reply normally without JSON.
-When listing events, only give concise response
+
+OUTPUT FORMAT RULES (STRICT):
+1. For CREATED events, return ONLY this format (Use DOUBLE newlines):
+   "✅ Event Created: [Summary]
+
+   📅 Time: [DD/MM/YYYY HH:MM AM/PM] - [End Time]
+
+   (Optional) 📝 [Description]"
+
+2. For LISTING events, return ONLY this format (Use DOUBLE newlines between items):
+   "📅 Your Schedule:
+
+   - [Summary] ([DD/MM/YYYY HH:MM AM/PM] - [End Time])
+
+   - [Summary] ([DD/MM/YYYY HH:MM AM/PM] - [End Time])"
+
+3. NEVER explain the technical steps.
+4. IMPORTANT: Convert ISO dates to DD/MM/YYYY.
+5. IMPORTANT: Ensure there are blank lines between items.
 </instructions>
 `;
 
