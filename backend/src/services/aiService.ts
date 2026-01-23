@@ -3,111 +3,156 @@ import { bookingTools } from "./bookingTools";
 import dotenv from "dotenv";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import path from "path";
 
 dotenv.config();
 
 const hf = new HfInference(process.env.HUGGING_FACE_API_KEY);
 
 // --- MCP CLIENT SETUP ---
-let mcpClient: Client | null = null;
+// Map of server name -> Client instance
+const mcpClients: Map<string, Client> = new Map();
+// Map of tool name -> Client instance (for routing)
+const toolToClientMap: Map<string, Client> = new Map();
 let mcpToolsOrchestration: any[] = [];
 
-async function connectToMcpServer() {
-    if (mcpClient) return mcpClient;
-    try {
-        const transport = new StdioClientTransport({
-            command: "npx",
-            args: ["-y", "@cocal/google-calendar-mcp"],
-            env: {
-                ...process.env,
-                GOOGLE_OAUTH_CREDENTIALS: process.env.GOOGLE_OAUTH_CREDENTIALS || "E:/J/Projects/01/TravelPoint_V/backend/credentials.json"
-            }
-        });
-        const client = new Client({ name: "TravelPoint-Client", version: "1.0.0" }, { capabilities: {} });
+// Resolve the absolute path to the OAuth credentials file
+const OAUTH_CREDENTIALS_PATH = path.resolve(__dirname, "../../gcp-oauth.keys.json");
+console.log("📍 OAuth Credentials Path:", OAUTH_CREDENTIALS_PATH);
+console.log("📍 File exists:", require('fs').existsSync(OAUTH_CREDENTIALS_PATH));
 
-        // Add timeout to prevent hanging if server awaits auth
-        const connectionPromise = client.connect(transport);
-        const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("MCP Connection Timed Out - Check if credentials.json is missing or Auth is pending")), 60000)
-        );
-
-        await Promise.race([connectionPromise, timeoutPromise]);
-
-        mcpClient = client;
-        try {
-            const result = await client.listTools();
-            mcpToolsOrchestration = result.tools;
-            console.log(`✅ MCP Connected. Tools found: ${result.tools.length}`);
-        } catch (toolError: any) {
-            console.error("❌ MCP Tool Discovery Failed:", toolError.message);
-            console.warn("⚠️ Using fallback definitions based on actual server errors.");
-
-            // Fallback based on ACTUAL server validation errors
-            mcpToolsOrchestration = [
-                {
-                    name: "add-account",
-                    description: "Authenticate a Google account (use this if 'No authenticated accounts' error occurs)",
-                    inputSchema: {
-                        type: "object",
-                        properties: {},
-                        required: []
-                    }
-                },
-                {
-                    name: "create-event",
-                    description: "Create a new event in Google Calendar",
-                    inputSchema: {
-                        type: "object",
-                        properties: {
-                            account: {
-                                type: "string",
-                                description: "Account nickname (default: 'normal')"
-                            },
-                            calendarId: {
-                                type: "string",
-                                description: "Calendar ID - ALWAYS use 'primary' for the user's primary calendar"
-                            },
-                            summary: { type: "string", description: "Event title" },
-                            description: { type: "string", description: "Event description" },
-                            start: {
-                                type: "string",
-                                description: "Start time as ISO string (e.g. 2024-01-20T10:00:00)"
-                            },
-                            end: {
-                                type: "string",
-                                description: "End time as ISO string (e.g. 2024-01-20T12:00:00)"
-                            },
-                            location: { type: "string", description: "Event location" }
-                        },
-                        required: ["calendarId", "summary", "start", "end"]
-                    }
-                },
-                {
-                    name: "list-events",
-                    description: "List events from calendar",
-                    inputSchema: {
-                        type: "object",
-                        properties: {
-                            account: { type: "string", description: "Account nickname (default: 'normal')" },
-                            calendarId: { type: "string", description: "Calendar ID (use 'primary')" },
-                            timeMin: { type: "string", description: "Start of time range (ISO format)" },
-                            timeMax: { type: "string", description: "End of time range (ISO format)" },
-                            maxResults: { type: "number", description: "Max events (default 10)" }
-                        },
-                        required: ["calendarId"]
-                    }
-                }
-            ];
-            console.log(`✅ Loaded ${mcpToolsOrchestration.length} fallback tools matching actual server schema.`);
+const MCP_SERVERS_CONFIG = [
+    {
+        name: "google-calendar",
+        command: "npx",
+        args: ["-y", "@cocal/google-calendar-mcp"],
+        env: {
+            GOOGLE_OAUTH_CREDENTIALS: process.env.GOOGLE_OAUTH_CREDENTIALS || OAUTH_CREDENTIALS_PATH
         }
-    } catch (e: any) {
-        console.error("❌ MCP Connection Failed (Non-fatal):", e.message);
-        console.warn("ℹ️  Note: mcp-google-calendar requires a credentials.json file/env var to function.");
+    },
+    {
+        name: "google-sheets",
+        command: "npx",
+        args: ["-y", "mcp-gsheets@latest"],
+        env: {
+            GOOGLE_PROJECT_ID: process.env.GOOGLE_PROJECT_ID || "travelpoint-mcp",
+            GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_SHEETS_SERVICE_ACCOUNT || path.resolve(__dirname, "../../service-account-sheets.json")
+        }
     }
+];
+
+async function connectToMcpServers() {
+    if (mcpClients.size > 0) return; // Already connected
+
+    console.log("🔗 Connecting to MCP Servers...");
+    mcpToolsOrchestration = [];
+    toolToClientMap.clear();
+
+    for (const serverConfig of MCP_SERVERS_CONFIG) {
+        try {
+            console.log(`   - Connecting to ${serverConfig.name}...`);
+
+            // Filter out undefined environment variables
+            const cleanEnv: Record<string, string> = {};
+            for (const [key, value] of Object.entries(process.env)) {
+                if (value !== undefined) {
+                    cleanEnv[key] = value;
+                }
+            }
+
+            // Filter server-specific env vars to remove undefined values
+            const serverEnv: Record<string, string> = {};
+            for (const [key, value] of Object.entries(serverConfig.env)) {
+                if (value !== undefined) {
+                    serverEnv[key] = value;
+                }
+            }
+
+            // Merge with server-specific env vars
+            const finalEnv = {
+                ...cleanEnv,
+                ...serverEnv
+            };
+
+            console.log(`     📍 Using credentials: ${finalEnv.GOOGLE_OAUTH_CREDENTIALS || finalEnv.GOOGLE_APPLICATION_CREDENTIALS || '(not set)'}`);
+
+            const transport = new StdioClientTransport({
+                command: serverConfig.command,
+                args: serverConfig.args,
+                env: finalEnv as Record<string, string>,
+                stderr: 'pipe' // Capture stderr for debugging
+            });
+
+            const client = new Client(
+                { name: `TravelPoint-${serverConfig.name}`, version: "1.0.0" },
+                { capabilities: {} }
+            );
+
+            // Capture stderr output for debugging
+            if ((transport as any).process?.stderr) {
+                (transport as any).process.stderr.on('data', (data: Buffer) => {
+                    const errorMsg = data.toString();
+                    if (errorMsg.includes('Error') || errorMsg.includes('error')) {
+                        console.error(`     🔴 ${serverConfig.name} stderr:`, errorMsg.trim());
+                    }
+                });
+            }
+
+            // Add timeout for connection
+            const connectionPromise = client.connect(transport);
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Connection to ${serverConfig.name} Timed Out`)), 30000)
+            );
+
+            await Promise.race([connectionPromise, timeoutPromise]);
+
+            mcpClients.set(serverConfig.name, client);
+
+            // List tools for this server
+            const result = await client.listTools();
+            console.log(`     ✅ Connected to ${serverConfig.name}. Tools: ${result.tools.map(t => t.name).join(', ')}`);
+
+            // Register tools
+            for (const tool of result.tools) {
+                mcpToolsOrchestration.push(tool);
+                toolToClientMap.set(tool.name, client);
+            }
+
+        } catch (error: any) {
+            console.error(`     ❌ Failed to connect to ${serverConfig.name}:`, error.message);
+            // Non-fatal, continue to next server
+        }
+    }
+
+    // Add fallback tools if Calendar failed specifically (legacy fallback)
+    if (!mcpClients.has("google-calendar")) {
+        console.warn("⚠️ Google Calendar missing, adding fallback definitions.");
+        const fallbacks = [
+            {
+                name: "create-event",
+                description: "Create a new event in Google Calendar (Offline/Fallback)",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        calendarId: { type: "string", description: "Calendar ID ('primary')" },
+                        summary: { type: "string" },
+                        start: { type: "string" },
+                        end: { type: "string" }
+                    },
+                    required: ["calendarId", "summary", "start", "end"]
+                }
+            }
+        ];
+        // Only add if not strictly conflicting, mainly for UI hints
+        // mcpToolsOrchestration.push(...fallbacks);
+    }
+
+    console.log(`✅ MCP Initialization Complete. Total Tools: ${mcpToolsOrchestration.length}`);
 }
 
 // Initialize MCP connection when module loads
-connectToMcpServer().catch(err => {
+// Initialize MCP servers when module loads
+connectToMcpServers().catch(err => {
     console.warn('⚠️ MCP initialization failed (non-fatal):', err.message);
 });
 
@@ -215,6 +260,24 @@ To call a tool, reply with ONLY valid JSON in this EXACT format:
 {"tool": "tool_name", "args": {"paramName": value}}
 
 If the user is just chatting (hello, thanks, etc), reply normally without JSON.
+
+GOOGLE SHEETS TOOL RULES (STRICT):
+- 🛑 DO NOT USE "sheets_batch_update_values" for adding rows. It is too complex.
+- ✅ USE "sheets_append_values" to add data.
+
+- For "sheets_create_spreadsheet": 
+  * Required: "title" (string)
+  * Optional: "headers" (array of strings)
+  * Example: {"tool": "sheets_create_spreadsheet", "args": {"title": "My Sheet", "headers": ["Name", "Email", "Phone"]}}
+
+- For "sheets_append_values":
+  * Required: "spreadsheetId" (string) - MUST be the EXACT ID from the user's URL. (e.g. "1wUB..."). DO NOT GUESS.
+  * Required: "range" (string) - usually "Sheet1!A1"
+  * Required: "values" (2D Array) - MUST be an Array of Arrays.
+  * ❌ WRONG: "[...]" (Stringified JSON)
+  * ❌ WRONG: [{"name": "John"}] (Array of Objects)
+  * ✅ RIGHT: [["John", "john@email.com"], ["Jane", "jane@email.com"]]
+  * Example: {"tool": "sheets_append_values", "args": {"spreadsheetId": "1wUB...", "range": "Sheet1!A1", "values": [["Chennai Express", "330", "6h 30m"], ["Kovai Express", "400", "7h"]]}}
 
 OUTPUT FORMAT RULES (STRICT):
 1. For CREATED events, return ONLY this format (Use DOUBLE newlines):
@@ -376,101 +439,48 @@ export const generateAIResponse = async (userMessage: string, userId: number = 1
                             break;
 
                         default:
-                            // Check if it's a Google Calendar MCP tool
-                            if (mcpClient && mcpToolsOrchestration.some(t => t.name === toolCall.tool)) {
-                                console.log(`📅 Executing MCP tool: ${toolCall.tool}`);
+                            // Check if it's an MCP tool managed by any connected server
+                            if (toolToClientMap.has(toolCall.tool)) {
+                                console.log(`🌍 Executing MCP tool via server: ${toolCall.tool}`);
+                                const client = toolToClientMap.get(toolCall.tool);
+
                                 try {
                                     // Transform to match server expectations
                                     let transformedArgs = toolCall.args;
 
-                                    // Handle @cocal/google-calendar-mcp tool: create-event (Flat structure)
+                                    // --- GOOGLE CALENDAR SPECIFIC NORMS ---
                                     if (toolCall.tool === "create-event") {
                                         transformedArgs = { ...toolCall.args };
 
-                                        // Ensure account exists. Default to 'personal' if missing or placeholder.
                                         const placeholders = ['value', 'your_account', 'user', 'default', 'account', 'normal'];
                                         if (!transformedArgs.account || placeholders.includes(transformedArgs.account)) {
                                             transformedArgs.account = 'personal';
                                         }
+                                        if (!transformedArgs.calendarId) transformedArgs.calendarId = 'primary';
 
-                                        // Ensure calendarId exists
-                                        if (!transformedArgs.calendarId) {
-                                            transformedArgs.calendarId = 'primary';
-                                        }
-
-                                        // If AI wrapped in 'event' (old habit), unwrap it
+                                        // Flatten if nested
                                         if (transformedArgs.event) {
                                             const evt = transformedArgs.event;
-                                            transformedArgs = {
-                                                ...transformedArgs,
-                                                ...evt,
-                                                // Prioritize event properties
-                                                summary: evt.summary || transformedArgs.summary,
-                                                description: evt.description || transformedArgs.description,
-                                                start: evt.start || transformedArgs.start,
-                                                end: evt.end || transformedArgs.end
-                                            };
+                                            transformedArgs = { ...transformedArgs, ...evt };
                                             delete transformedArgs.event;
                                         }
 
-                                        // Ensure start/end are strings (AI might give objects)
-                                        if (typeof transformedArgs.start === 'object') {
-                                            transformedArgs.start = transformedArgs.start.dateTime || transformedArgs.start.date;
-                                        }
-                                        if (typeof transformedArgs.end === 'object') {
-                                            transformedArgs.end = transformedArgs.end.dateTime || transformedArgs.end.date;
-                                        }
-
-                                        console.log("🔧 Normalized create-event args (Flat structure)");
+                                        // Fix dates
+                                        if (typeof transformedArgs.start === 'object') transformedArgs.start = transformedArgs.start.dateTime || transformedArgs.start.date;
+                                        if (typeof transformedArgs.end === 'object') transformedArgs.end = transformedArgs.end.dateTime || transformedArgs.end.date;
                                     }
-                                    // Handle mcp-google-calendar tool: create_calendar_event (Nested 'event' structure)
-                                    else if (toolCall.tool === "list-events") {
+
+                                    if (toolCall.tool === "list-events") {
                                         transformedArgs = { ...toolCall.args };
-
-                                        // Ensure account exists. Default to 'personal' if missing or placeholder.
-                                        const placeholders = ['value', 'your_account', 'user', 'default', 'account', 'normal'];
-                                        if (!transformedArgs.account || placeholders.includes(transformedArgs.account)) {
-                                            transformedArgs.account = 'personal';
-                                        }
-
-                                        // Ensure calendarId exists and fix placeholders
-                                        if (!transformedArgs.calendarId || transformedArgs.calendarId === 'value' || transformedArgs.calendarId === 'your_calendar_id') {
-                                            transformedArgs.calendarId = 'primary';
-                                        }
-
-                                        // Limit maxResults to prevent context overflow (default to 5 if not set)
-                                        if (!transformedArgs.maxResults) {
-                                            transformedArgs.maxResults = 5;
-                                        }
-
-                                        console.log("🔧 Normalized list-events args (Limit 5 events)");
-                                    }
-                                    // Handle mcp-google-calendar tool: create_calendar_event (Nested 'event' structure)
-                                    else if (toolCall.tool === "create_calendar_event") {
-                                        // Wrapper logic for original server (if fallback used)
-                                        if (toolCall.args.event) {
-                                            // Already wrapped, just fix dates
-                                            const evt = toolCall.args.event;
-                                            if (typeof evt.start === 'object' || typeof evt.end === 'object') {
-                                                transformedArgs = {
-                                                    ...toolCall.args,
-                                                    event: {
-                                                        ...evt,
-                                                        start: typeof evt.start === 'object' ? (evt.start.dateTime || evt.start.date) : evt.start,
-                                                        end: typeof evt.end === 'object' ? (evt.end.dateTime || evt.end.date) : evt.end
-                                                    }
-                                                };
-                                            }
-                                        } else {
-                                            // Flat args needs wrapping
-                                            transformedArgs = {
-                                                calendarId: toolCall.args.calendarId || 'primary',
-                                                event: { ...toolCall.args }
-                                            };
-                                        }
+                                        if (!transformedArgs.account) transformedArgs.account = 'personal';
+                                        if (!transformedArgs.calendarId) transformedArgs.calendarId = 'primary';
                                     }
 
-                                    const mcpResult = await mcpClient.callTool({
+                                    // --- GOOGLE SHEETS SPECIFIC NORMS (Optional) ---
+                                    // Add logic here if specific sheet arg transformation is needed
+
+                                    // CALL THE TOOL
+                                    const mcpResult = await client!.callTool({
                                         name: toolCall.tool,
                                         arguments: transformedArgs
                                     });
@@ -480,18 +490,13 @@ export const generateAIResponse = async (userMessage: string, userId: number = 1
                                         .map((c: any) => c.type === 'text' ? c.text : '')
                                         .join('\n');
 
-                                    // Truncate if too long (prevents context overflow)
+                                    // Truncate if too long
                                     if (toolResult && toolResult.length > 4000) {
-                                        console.log(`⚠️ Truncating large tool result (${toolResult.length} chars)`);
-                                        toolResult = toolResult.substring(0, 4000) + "\n... (Output truncated due to length limits)";
+                                        toolResult = toolResult.substring(0, 4000) + "\n... (Truncated)";
                                     }
                                 } catch (mcpError: any) {
-                                    console.error(`❌ MCP tool execution failed:`, mcpError);
-                                    if (toolCall.tool.includes('calendar')) {
-                                        toolResult = `I can see you want to use the calendar feature, but the Google Calendar service isn't fully configured yet. Please ask your administrator to set up the calendar credentials.`;
-                                    } else {
-                                        toolResult = `Calendar operation failed: ${mcpError.message}`;
-                                    }
+                                    console.error(`❌ MCP tool execution failed for ${toolCall.tool}:`, mcpError);
+                                    toolResult = `External Tool Error: ${mcpError.message}`;
                                 }
                             } else {
                                 console.warn(`⚠️ Unknown tool: ${toolCall.tool}`);
