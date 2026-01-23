@@ -33,7 +33,7 @@ const MCP_SERVERS_CONFIG = [
     {
         name: "google-sheets",
         command: "npx",
-        args: ["-y", "mcp-gsheets@latest"],
+        args: ["ts-node", "src/mcp-sheets/index.ts"],
         env: {
             GOOGLE_PROJECT_ID: process.env.GOOGLE_PROJECT_ID || "travelpoint-mcp",
             GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_SHEETS_SERVICE_ACCOUNT || path.resolve(__dirname, "../../service-account-sheets.json")
